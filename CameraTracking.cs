@@ -1,24 +1,27 @@
 using UnityEngine;
 
-public class CameraTracking : MonoBehaviour
+public class MarioStyleCamera : MonoBehaviour
 {
-    [SerializeField] private Transform target;
-    [SerializeField] private float trackingSpeed = 5f; 
+    [Header("Target & Offset Settings")]
+    [SerializeField] private Transform target;           // 플레이어 Transform
+    [SerializeField] private float lookAheadDistance = 3f; // 전방 시야 확보 거리 (Look-Ahead)
+    [SerializeField] private float smoothSpeed = 5f;        // 카메라 이동 부드러움 계수 (Lerp Speed)
 
-    [Header("Forward View Settings")]
-    // 캐릭터가 바라보는 전방 시야를 얼마나 넓게 보여줄지 결정하는 거리 (오프셋)
-    [SerializeField] private float forwardOffset = 4.0f;
-    // 방향이 바뀔 때 카메라가 좌우로 화면을 전환하는 속도
-    [SerializeField] private float flipSmoothSpeed = 3.0f;
+    [Header("Mario World Turn Logic")]
+    [SerializeField] private float turnThreshold = 2f;    // 방향 전환 후 카메라가 반응하기 위해 더 이동해야 하는 거리
 
-    private PlayerController playerController;
-    private float currentXOffset;
+    private float currentFacingDir = 1f; // 현재 카메라가 바라보고 있는 방향 (1: 오른쪽, -1: 왼쪽)
+    private float lastFacingDir = 1f;    // 플레이어의 이전 바라보는 방향
+    private Vector3 turnStartPosition;   // 방향을 바꾼 시점의 플레이어 위치
+    private bool isWaitingForThreshold = false; // 방향 전환 유예 상태 여부
 
     private void Start()
     {
         if (target != null)
         {
-            playerController = target.GetComponent<PlayerController>();
+            // 시작 시 플레이어가 바라보는 방향 초기화 (오른쪽: 1, 왼쪽: -1)
+            lastFacingDir = target.localScale.x >= 0 ? 1f : -1f;
+            currentFacingDir = lastFacingDir;
         }
     }
 
@@ -26,40 +29,43 @@ public class CameraTracking : MonoBehaviour
     {
         if (target == null) return;
 
-        Vector3 cameraPos = transform.position;
-        bool isFacingRight = true;
+        // 1. 현재 플레이어의 바라보는 방향 확인 (Scale.x 또는 이동 입력 기준)
+        float playerFacingDir = GetPlayerFacingDirection();
 
-        if (playerController != null)
+        // 2. 플레이어가 바라보는 방향을 뒤집었는지 체크
+        if (playerFacingDir != lastFacingDir)
         {
-            isFacingRight = playerController.isFacingRight; 
+            isWaitingForThreshold = true;
+            turnStartPosition = target.position; // 방향을 바꾼 '기점' 좌표 기록
+            lastFacingDir = playerFacingDir;
         }
 
-        // 가로축: 바라보는 방향에 따른 목표 오프셋 계산 (수식 보정)
-        // 오른쪽을 볼 때는 +forwardOffset, 왼쪽을 볼 때는 -forwardOffset
-        float targetXOffset = isFacingRight ? forwardOffset : -forwardOffset;
-
-        // 오프셋 값 자체를 부드럽게 보간하여 방향 전환 시 카메라가 슥 움직이게 함.
-        currentXOffset = Mathf.Lerp(currentXOffset, targetXOffset, flipSmoothSpeed * Time.deltaTime);
-
-        // 최종 카메라의 가로 목표 좌표 = 플레이어 위치 + 계산된 방향 오프셋
-        float targetXPos = target.position.x + currentXOffset;
-        cameraPos.x = Mathf.Lerp(cameraPos.x, targetXPos, trackingSpeed * Time.deltaTime);
-
-
-        // 2. 세로축: 점근적 평균 Lerp 수식
-        if (target.position.y != cameraPos.y)
+        // 3. 슈퍼마리오 월드 로직: 방향을 바꾼 후 일정 거리를 더 걸어갔는지 판정
+        if (isWaitingForThreshold)
         {
-            cameraPos.y = Mathf.Lerp(cameraPos.y, target.position.y, trackingSpeed * Time.deltaTime);
+            // 방향을 바꾼 기점(turnStartPosition)으로부터의 X축 이동 거리 연산
+            float movedDistance = Mathf.Abs(target.position.x - turnStartPosition.x);
+
+            // 유예 거리(turnThreshold)를 넘어서면 비로소 카메라의 타겟 방향을 뒤집음
+            if (movedDistance >= turnThreshold)
+            {
+                currentFacingDir = playerFacingDir;
+                isWaitingForThreshold = false; // 유예 상태 해제
+            }
         }
 
-        transform.position = cameraPos;
+        // 4. 최종 카메라 목표 위치(Target Position) 계산
+        float targetOffsetX = currentFacingDir * lookAheadDistance;
+        Vector3 targetPosition = new Vector3(target.position.x + targetOffsetX, target.position.y, transform.position.z);
+
+        // 5. SmoothDamp 또는 Lerp를 이용해 부드럽게 카메라 이동
+        transform.position = Vector3.Lerp(transform.position, targetPosition, smoothSpeed * Time.deltaTime);
     }
 
-    private void OnDrawGizmos()
+    // 플레이어의 방향을 판별하는 보조 함수 (프로젝트 방식에 맞게 수정 가능)
+    private float GetPlayerFacingDirection()
     {
-        if (target == null) return;
-        Gizmos.color = Color.green;
-        Vector3 targetGoal = new Vector3(target.position.x + currentXOffset, target.position.y, transform.position.z);
-        Gizmos.DrawWireSphere(targetGoal, 0.5f);
+        // 예시: 플레이어의 Scale.x 가 양수면 오른쪽(1), 음수면 왼쪽(-1)
+        return target.localScale.x >= 0 ? 1f : -1f;
     }
 }
